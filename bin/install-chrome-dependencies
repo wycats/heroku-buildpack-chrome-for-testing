@@ -115,6 +115,7 @@ else
   echo "Using cached APT package index" | indent
 fi
 
+PACKAGES_NEEDED=false
 for PACKAGE in $PACKAGES; do
   if [[ $PACKAGE == *deb ]]; then
     PACKAGE_NAME=$(basename $PACKAGE .deb)
@@ -123,18 +124,30 @@ for PACKAGE in $PACKAGES; do
     echo "Fetching $PACKAGE" | indent
     curl -s -L -z $PACKAGE_FILE -o $PACKAGE_FILE $PACKAGE 2>&1 | indent
   else
-    echo "Fetching .debs for $PACKAGE" | indent
-    # Remove --reinstall flag to use cached packages
-    apt-get $APT_OPTIONS -y --force-yes -d install --no-install-recommends $PACKAGE | indent
+    # Check if package needs to be downloaded
+    OUTPUT=$(apt-get $APT_OPTIONS -y --force-yes -d install --no-install-recommends $PACKAGE 2>&1)
+    if echo "$OUTPUT" | grep -q "Need to get [1-9]"; then
+      PACKAGES_NEEDED=true
+      echo "Fetching .debs for $PACKAGE" | indent
+      echo "$OUTPUT" | indent
+    fi
   fi
 done
 
 mkdir -p $BUILD_DIR/.apt
 
-for DEB in $(ls -1 $APT_CACHE_DIR/archives/*.deb); do
-  echo "Installing $(basename $DEB)" | indent
-  dpkg -x $DEB $BUILD_DIR/.apt/
-done
+if [[ "$PACKAGES_NEEDED" == "true" ]]; then
+  echo "Installing packages" | indent
+  for DEB in $(ls -1 $APT_CACHE_DIR/archives/*.deb); do
+    echo "  $(basename $DEB)" | indent
+    dpkg -x $DEB $BUILD_DIR/.apt/
+  done
+else
+  echo "Extracting cached packages" | indent
+  for DEB in $(ls -1 $APT_CACHE_DIR/archives/*.deb); do
+    dpkg -x $DEB $BUILD_DIR/.apt/
+  done
+fi
 
 echo "Writing profile script" | indent
 mkdir -p $BUILD_DIR/.profile.d
